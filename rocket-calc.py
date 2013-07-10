@@ -38,10 +38,10 @@ SEPARATOR = .015
 STAGE_MASS = .2
 #MISC = .3
 # 
-PAYLOAD = LARGE_CAN + CHUTES + SMALL_STRUTS + LADDER + LIGHTS + BATT
+# PAYLOAD = LARGE_CAN + CHUTES + SMALL_STRUTS + LADDER + LIGHTS + BATT
 # PAYLOAD = SMALL_CAN + CHUTE + LARGE_STRUTS + LADDER + LIGHTS + BATT + SMALL_DOCKING_PORT + SMALL_RCS
 # PAYLOAD = 40. # Large fuel tank
-# PROBE = OKTO + XENON + XENON_TANK + PANEL * 8 + BATT # Probe
+PAYLOAD = OKTO + XENON + XENON_TANK + PANEL * 8 + BATT # Probe
 # PAYLOAD = LARGE_POD + CHUTES + LIGHTS + BATT + SMALL_RCS + SMALL_DOCKING_PORT # Gemini
 # PAYLOAD = CHAIR + OKTO2 + TINY_STRUTS + BATT + TINY_PANEL # Scott Manley's tiny lander
 # PAYLOAD = SMALL_POD + CHUTE + SMALL_STRUTS + LADDER + LIGHTS + BATT
@@ -194,17 +194,17 @@ def find(payload_k, delta_vs):
 		#print bisect.bisect(TANKS_BY_MASS, (best - stage[0]))
 		for tank in TANKS[0:bisect.bisect(TANKS_BY_MASS, (best - stage[0], 0))]:
 			for engine in ENGINES[0:bisect.bisect(ENGINES_BY_MASS, (best - (stage[0] + sum(tank)), 0))]:
-				this_mass = tank[1] + engine[1] + stage[0] + STAGE_MASS
-				dv_this = delta_v(this_mass, tank[0], engine[0])
+				dry_mass = tank[1] + engine[1] + stage[0] + STAGE_MASS
+				dv_this = delta_v(dry_mass, tank[0], engine[0])
 				req_twr = stage_twr(delta_vs, dv_sum, dv_this)
-				if (req_twr > this_mass * req_twr):
-					continue
-				else:
-					next_stages.append((this_mass, dv_this, tank, engine, stage))
+				if (req_twr <= engine[2]/(dry_mass + tank[0])):
+					next_stages.append((dry_mass + tank[0], dv_this, tank, engine, stage))
 		#print next_stages
 		return next_stages
 	dv_goal = sum((dv[0] for dv in delta_vs))
+	print dv_goal
 	start = (ideal(payload_k, dv_goal), (payload_k, 0., None, None, None))
+	print start[0]
 	best = None # Best solution
 	heap = []
 	solved = False
@@ -212,11 +212,15 @@ def find(payload_k, delta_vs):
 	
 	while solved == False and len(heap) > 0:
 		head = heapq.heappop(heap)
+		#print head[0]
 		dv_sum = stage_delta_v(head[1])
 		if dv_sum > dv_goal:
 			# We have a solution
 			if best is not None:
-				if best[0] > head[1]:
+				if best[1][0] > head[1][0]:
+					# We have a better solution
+					print "best:", best[1][0], '->', head[1][0]
+					stage_print(best[1])
 					best = head
 				elif best[0] > head[0]:
 					# best is THE solution
@@ -251,7 +255,7 @@ JETO = [(1000, 1.5), (3500, 1.5)]
 SSTO = [(4500, 1.5)]
 #, (2000, 1.5), (2500, 1.5)]
 #DUNA_PLAN = desired_stages = [(1380*2 + 1673 + 915*2, DUNA), (1702, 0), (2000, 1.5), (2500, 1.5)]
-mass, stages = find(PAYLOAD, MINMUS_PLAN + LKO)
+mass, stages = find(PAYLOAD, LKO)
 print "Lander:", mass
 stage_print(stages)
 #ENGINES.append( 
