@@ -70,14 +70,14 @@ SEPARATOR = .015
 STAGE_MASS = .2
 #MISC = .3
 # 
-# PAYLOAD = LARGE_CAN + CHUTES + LARGE_STRUTS + LADDER + LIGHTS + BATT + SMALL_DOCKING_PORT + SMALL_RCS
+PAYLOAD = LARGE_CAN + CHUTES + SMALL_STRUTS + LADDER + LIGHTS + BATT
 # PAYLOAD = SMALL_CAN + CHUTE + LARGE_STRUTS + LADDER + LIGHTS + BATT + SMALL_DOCKING_PORT + SMALL_RCS
 # PAYLOAD = 40. # Large fuel tank
 # PROBE = OKTO + XENON + XENON_TANK + PANEL * 8 + BATT # Probe
 # PAYLOAD = LARGE_POD + CHUTES + LIGHTS + BATT + SMALL_RCS + SMALL_DOCKING_PORT # Gemini
 # PAYLOAD = CHAIR + OKTO2 + TINY_STRUTS + BATT + TINY_PANEL # Scott Manley's tiny lander
 # PAYLOAD = SMALL_POD + CHUTE + SMALL_STRUTS + LADDER + LIGHTS + BATT
-PAYLOAD = SMALL_POD + CHUTE
+# PAYLOAD = SMALL_POD + CHUTE
 # PAYLOAD = 0.
 
 tanks = []
@@ -205,12 +205,13 @@ def find(payload, delta_vs):
 		return None, None
 
 print PAYLOAD
-MINMUS_PLAN = [(2*80+240*2 + 960*2, 1.5) ]
+MINMUS_PLAN = [(2*80+300*2+960*2 + 100, MINMUS) ]
 GEMINI_PLAN = [(240, MINMUS)]
 JOOL_PLAN = [(2630, 0), (2630, 0), (950+965, 0)]
 SYNC = [(1000, 0)]
-MUN_PLAN = [(870*2., 0)]
-MUNAR_LANDER_PLAN = [(860., MUN), (860., MUN)]
+MUN_PLAN = [(800*2., 0)]
+# MUNAR_LANDER_PLAN = [(860., MUN), (860., MUN)] # Too little fuel to land, just enough to head back.
+MUNAR_LANDER_PLAN = [(1000., MUN), (1200., MUN)]
 DUNA_PLAN = [(1673, 0), (1380*2,  DUNA), (915*2, IKE),  (1702, 0)]
 DUNAR_LANDER_PLAN = [(1380*2, DUNA), (915*2, IKE)]
 DUNA_AND_BACK = [(1673, 0), (1702, 0)]
@@ -219,13 +220,13 @@ JETO = [(1000, 1.5), (3500, 1.5)]
 SSTO = [(4500, 1.5)]
 #, (2000, 1.5), (2500, 1.5)]
 #DUNA_PLAN = desired_stages = [(1380*2 + 1673 + 915*2, DUNA), (1702, 0), (2000, 1.5), (2500, 1.5)]
-mass, stages = find(PAYLOAD, LKO)
+mass, stages = find(PAYLOAD, MINMUS_PLAN + LKO)
 print "Lander:", mass
 print_stages(stages)
 #ENGINES.append( 
 	#(800, 2.25, 60, 'LV-N'), # Skipped -- Too hard to work around
 #)
-#mass, stages = find(mass + 2*PROBE, DUNA_AND_BACK + LKO)
+#mass, stages = find(mass, MUN_PLAN + LKO)
 #print "Lifter:"
 # mass, stages = find(6.76675, DUNA_AND_BACK + LKO)
 #print_stages(stages)
