@@ -79,16 +79,16 @@ ENGINES = [
 	(390, 1.8, 150, 'Triple LV-909'),
 	(390, 2.5, 220, 'Poodle'),
 	# (280, 7.5, 1830, 'Mainsail + 2xSRB'), # This is an estimate, probably fairly inaccurate
-	(280, 6., 1500 * .9, 'Mainsail'),
-	(280, 12., 3000 * .9, 'Double Mainsail'),
-	(280, 18., 4500 * .9, 'Triple Mainsail'),
-	(280, 24., 6000 * .9, 'Quadruple Mainsail'),
-	(280, 24., 7500 * .9, 'Quintuple Mainsail'),
-	(280, 24., 9000 * .9, '6x Mainsail'),
-	(280, 24., 10500 * .9, 'Septuple Mainsail'),
+	(280, 6., 1500 * .9, 'Mainsail'), # Run mainsails at 90% for heat
+	(280, 12., 3000 * .9, 'Double Mainsail'), # Run mainsails at 90% for heat
+	(280, 18., 4500 * .9, 'Triple Mainsail'), # Run mainsails at 90% for heat
+	(280, 24., 6000 * .9, 'Quadruple Mainsail'), # Run mainsails at 90% for heat
+	(280, 24., 7500 * .9, 'Quintuple Mainsail'), # Run mainsails at 90% for heat
+	(280, 24., 9000 * .9, '6x Mainsail'), # Run mainsails at 90% for heat
+	(280, 24., 10500 * .9, 'Septuple Mainsail'), # Run mainsails at 90% for heat
 	(330, 4., 650, 'Skipper'),
 	# (330, 8., 1300, 'Double Skipper'),
-	# (800, 2.25, 60, 'LV-N'), # Skipped -- Too hard to land around
+	(800, 2.25, 60, 'LV-N'), # Skipped -- Too hard to land around
 	(320, 1.8, 240, 'Radial pair'),
 	(320, 2.4, 260, 'Radial triplet'),
 	(290, .03, 1.5, 'LV-1'),
@@ -101,7 +101,14 @@ ENGINES_BY_THRUST = [(e[2], e) for e in ENGINES]
 ENGINES_BY_MASS = [(e[1], e) for e in ENGINES]
 ENGINES.sort()
 ENGINES_BY_THRUST.sort()
+ENGINES_BY_MASS.sort()
+ENGINES_BY_IMPULSE = {}
+for isp in set([e[0] for e in ENGINES]):
+	ENGINES_BY_IMPULSE[isp] = []
+for e in ENGINES_BY_MASS:
+	ENGINES_BY_IMPULSE[e[1][0]].append(e[1])
 
+MIN_ISP = ENGINES[0][0]
 MAX_ISP = ENGINES[-1][0]
 
 def delta_v(dry_mass_k, fuel_mass_k, impulse_s):
@@ -123,57 +130,71 @@ def ideal(payload_k, delta_v):
 	Return the lowest possible mass to accelerate the payload to a given delta-v. 
 	Includes the weight of the fuel, payload, "perfect" engine, and STAGE_MASS
 	'''
-	min_weight = min((engine[1] for engine in ENGINES))
+	min_weight = ENGINES_BY_MASS[0][1][1]
 	adj_payload = payload_k + STAGE_MASS + min_weight;
 	ideal_mass = fuel_mass(delta_v, MAX_ISP, payload_k + STAGE_MASS + min_weight)
 	return adj_payload + ideal_mass
 
-# stage = (mass, dv, tank, engine, next)
+# stage = (mass, dv, dv_sum, tank, engine, next)
 # old stage = (dv, mass, 
-def stage_print(stage):
+def stage_print(stage, delta_vs):
 	while stage is not None:
 		print stage[1], stage[0], 
-		if stage[2] is None:
+		if stage[3] is None:
 			print 'No tank',
 		else:
-			print stage[2][1],
-		if stage[3] is None:
+			print stage[3][1],
+		if stage[4] is None:
 			print 'No engine'
 		else:
-			print stage[3][3]
-		stage = stage[4]
+			print stage[4][3],
+			print stage[4][2]/(stage[0] * G_m)
+			#print stage_twr(delta_vs, stage[2] - stage[1], stage[1])
+		stage = stage[5]
 
-def stage_delta_v(stage):
-	dv = 0.
+def stage_count(stage):
+	count = 1
 	while stage is not None:
-		dv += stage[1]
-		stage = stage[4]
-	return dv
+		count += 1
+		stage = stage[5]
+	return count
 
 def stage_twr(delta_vs, dv_min, dv_max):
 	''' Return the maximum TWR listed in delta_vs between the min and max delta-vs '''
-	index = 0
-	rem = 0
 	twr = 0.
 	for idx in xrange(len(delta_vs)):
-		index = idx
-		dv_min -= delta_vs[idx][0]
-		if dv_min < delta_vs[idx][0]:
-			rem = delta_vs[idx][0] - dv_min
-			break
-		else:
+		if dv_min >= 0:
 			dv_min -= delta_vs[idx][0]
-	if (index < len(delta_vs)):
-		twr = delta_vs[index][1]
-		dv_max -= delta_vs[index][0]
-	for idx in xrange(len(delta_vs) - index - 1):
-		twr = max(delta_vs[idx][1], twr)
-		dv_max -= delta_vs[idx][0]
-		if dv_max < 0:
+			excess = delta_vs[idx][0] + dv_min
+		if dv_min <= 0 and dv_max >= 0:
+			twr = max(delta_vs[idx][1], twr)
+			dv_max -= (delta_vs[idx][0] - excess)
+			excess = 0
+			dv_min = 0
+		if dv_max <= 0:
+			if idx < len(delta_vs):
+				return max(delta_vs[idx][1], twr)
 			return twr
 	return twr
 
-def find(payload_k, delta_vs):
+def fuel_stage(stage, best, dv_goal, stages, delta_vs, next_stages, tank):
+	if stage[4] is None:
+		return
+	engine = (stage[4][0], 0, stage[4][2], 'fuel')
+	return next_stage(stage, best, dv_goal, stages, delta_vs, next_stages, tank, engine)
+
+def next_stage(stage, best, dv_goal, stages, delta_vs, next_stages, tank, engine):
+	dry_mass = tank[1] + engine[1] + stage[0] + STAGE_MASS
+	stage_mass = dry_mass + tank[0]
+	dv_this = delta_v(dry_mass, tank[0], engine[0])
+	req_twr = stage_twr(delta_vs, stage[2], dv_this)
+	if (req_twr <= engine[2]/(stage_mass * G_m)):
+		this_stage = (stage_mass, dv_this, stage[2] + dv_this, tank, engine, stage)
+		pos = bisect.bisect(stages, stage)
+		if len(stages) <= 0 or stages[pos - 1][2] < this_stage[2]:
+			next_stages.append(this_stage)
+
+def find(payload_k, delta_vs, max_stages=10):
 	'''
 	Finds a way to get the payload up by delta-v.
 	Anything that doesn't match the requrested TWR ratios will be ignored.
@@ -183,56 +204,95 @@ def find(payload_k, delta_vs):
 	@param delta_vs: A sequence of delta-vs + TWRs that must be achieved
 	The first stage of the mission must be the last delta-v parameter
 	'''
-	def next_states(stage, best, dv_sum):
+	def next_states(stage, best, dv_goal, stages, delta_vs):
 		''' Returns a list of the next possible states from this stage, These will be of a form (score (mass, dv, tank, engine, next)) '''
 		if best is None:
 			best = float('inf')
-		dv_sum = stage_delta_v(stage) # This is already calculated above, no need to 
+		#dv_sum = stage_delta_v(stage) # This is already calculated above, no need to 
 					      # do it twice.
 		# Skip tanks and engines that are too heavy
 		next_stages = []
-		#print bisect.bisect(TANKS_BY_MASS, (best - stage[0]))
-		for tank in TANKS[0:bisect.bisect(TANKS_BY_MASS, (best - stage[0], 0))]:
-			for engine in ENGINES[0:bisect.bisect(ENGINES_BY_MASS, (best - (stage[0] + sum(tank)), 0))]:
-				dry_mass = tank[1] + engine[1] + stage[0] + STAGE_MASS
-				dv_this = delta_v(dry_mass, tank[0], engine[0])
-				req_twr = stage_twr(delta_vs, dv_sum, dv_this)
-				if (req_twr <= engine[2]/(dry_mass + tank[0])):
-					next_stages.append((dry_mass + tank[0], dv_this, tank, engine, stage))
-		#print next_stages
+		# Find the largest tank we'll need by using the worst engine we can (and thrusting allll the way)
+		theory_tank = bisect.bisect(TANKS, (fuel_mass(dv_goal - stage[2], MIN_ISP, payload_k + ENGINES_BY_MASS[-1][1][1] + TANKS[-1][1]), 0))
+		# Find the largest tank we'll need by getting the largest tank we can use 
+		meet_tank = bisect.bisect(TANKS, (best - stage[0], 0))
+		
+		for tank in TANKS[0:min(theory_tank, meet_tank)]:
+			fuel_stage(stage, best, dv_goal, stages, delta_vs, next_stages, tank)
+			for engine in ENGINES:
+				next_stage(stage, best, dv_goal, stages, delta_vs, next_stages, tank, engine)
 		return next_stages
+
+	def push_stage(heap, stages, stage, dv_goal):
+		''' 
+		Pushes the stage onto the heap iff the stage is higher than the bar. 
+		Stages must be lighter or have more dv than similar stages.
+		'''
+		if len(stages) == 0:
+			heapq.heappush(heap, (ideal(stage[0], dv_goal - stage[2]), stage))
+			stages.append(stage)
+			return
+		pos = bisect.bisect(stages, stage)
+		# Ignore stage completely if the smaller item has a higher dv
+		# print stages, stage
+		# print stages[pos - 1][2], stage[2]
+		if pos > 1 and stages[pos - 1][2] > stage[2]:
+			return
+	
+		# Remove items larger with a lower dv than our blessed stage
+		lbound = pos
+		ubound = len(stages) - 1
+		while lbound < ubound:
+			mid = (lbound + ubound) / 2
+			if stages[pos][2] > stages[mid][2]:
+				lbound = mid + 1
+			else:
+				ubound = mid - 1
+
+		# print pos, lbound, ubound, stages
+
+		# print pos, ubound
+		for i in xrange(ubound - pos):
+			# print i,
+			stages.pop(pos)
+		stages.insert(pos, stage)
+		heapq.heappush(heap, (ideal(stage[0], dv_goal - stage[2]), stage))
+		
 	dv_goal = sum((dv[0] for dv in delta_vs))
 	print dv_goal
-	start = (ideal(payload_k, dv_goal), (payload_k, 0., None, None, None))
+	start = (payload_k, 0., 0., None, None, None)
 	print start[0]
 	best = None # Best solution
 	heap = []
+	stages = []
 	solved = False
-	heapq.heappush(heap, (start))
+	push_stage(heap, stages, start, dv_goal)
 	
 	while solved == False and len(heap) > 0:
 		head = heapq.heappop(heap)
-		#print head[0]
-		dv_sum = stage_delta_v(head[1])
-		if dv_sum > dv_goal:
+		# print head[1][0]
+		#dv_sum = head[1][2]
+		if head[1][2] > dv_goal:
 			# We have a solution
 			if best is not None:
 				if best[1][0] > head[1][0]:
 					# We have a better solution
 					print "best:", best[1][0], '->', head[1][0]
-					stage_print(best[1])
 					best = head
+					stage_print(best[1], delta_vs)
 				elif best[0] > head[0]:
 					# best is THE solution
 					solved = True
 			else:
 				best = head
-		else:
+				stage_print(best[1], delta_vs)
+		elif stage_count(head[1]) <= max_stages:
 			best_mass = float('inf')
 			if best is not None:
 				best_mass = best[0]
-			for item in next_states(head[1], best_mass, dv_sum):
-				heapq.heappush(heap, (ideal(item[0], dv_goal - item[1]), item))
+			for item in next_states(head[1], best_mass, dv_goal, stages, delta_vs):
+				push_stage(heap, stages, item, dv_goal)
+				
 	if solved or best is not None:
 		return best[1][0], best[1]
 	else:
@@ -240,24 +300,26 @@ def find(payload_k, delta_vs):
 		return None, None
 
 print PAYLOAD
-MINMUS_PLAN = [(2*80+300*2+960*2 + 100, MINMUS)]
+MINMUS_PLAN = [(960, 0), (2*80+300*2 + 100, MINMUS), (960, 0)]
 GEMINI_PLAN = [(240, MINMUS)]
 JOOL_PLAN = [(2630, 0), (2630, 0), (950+965, 0)]
 SYNC = [(1000, 0)]
-MUN_PLAN = [(800*2., 0)]
 # MUNAR_LANDER_PLAN = [(860., MUN), (860., MUN)] # Too little fuel to land, just enough to head back.
-MUNAR_LANDER_PLAN = [(1000., MUN), (1200., MUN)]
+MUN_PLAN = [(800., 0), (2200., MUN), (800., 0)]
 DUNA_PLAN = [(1673, 0), (1380*2,  DUNA), (915*2, IKE),  (1702, 0)]
 DUNAR_LANDER_PLAN = [(1380*2, DUNA), (915*2, IKE)]
 DUNA_AND_BACK = [(1673, 0), (1702, 0)]
 LKO = [(2000, 1.5), (2500, 1.5)]
 JETO = [(1000, 1.5), (3500, 1.5)]
 SSTO = [(4500, 1.5)]
+# PLAN = MUN_PLAN + LKO
+PLAN = MINMUS_PLAN + LKO
 #, (2000, 1.5), (2500, 1.5)]
 #DUNA_PLAN = desired_stages = [(1380*2 + 1673 + 915*2, DUNA), (1702, 0), (2000, 1.5), (2500, 1.5)]
-mass, stages = find(PAYLOAD, LKO)
+mass, stages = find(PAYLOAD, PLAN, 6)
 print "Lander:", mass
-stage_print(stages)
+stage_print(stages, PLAN)
+print PLAN
 #ENGINES.append( 
 	#(800, 2.25, 60, 'LV-N'), # Skipped -- Too hard to work around
 #)
