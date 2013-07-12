@@ -2,6 +2,7 @@
 import math
 import heapq
 import bisect
+import sys
 
 # Gravity in m/s
 G_m = 9.80665
@@ -40,8 +41,8 @@ STAGE_MASS = .2
 # 
 # PAYLOAD = LARGE_CAN + CHUTES + SMALL_STRUTS + LADDER + LIGHTS + BATT
 # PAYLOAD = SMALL_CAN + CHUTE + LARGE_STRUTS + LADDER + LIGHTS + BATT + SMALL_DOCKING_PORT + SMALL_RCS
-# PAYLOAD = 40. # Large fuel tank
-PAYLOAD = OKTO + XENON + XENON_TANK + PANEL * 8 + BATT # Probe
+PAYLOAD = 40. # Large fuel tank
+# PAYLOAD = OKTO + XENON + XENON_TANK + PANEL * 8 + BATT # Probe
 # PAYLOAD = LARGE_POD + CHUTES + LIGHTS + BATT + SMALL_RCS + SMALL_DOCKING_PORT # Gemini
 # PAYLOAD = CHAIR + OKTO2 + TINY_STRUTS + BATT + TINY_PANEL # Scott Manley's tiny lander
 # PAYLOAD = SMALL_POD + CHUTE + SMALL_STRUTS + LADDER + LIGHTS + BATT
@@ -52,7 +53,7 @@ TANKS = []
 # Tanks are listed as tuples with wet_mass, dry_mass
 # Total fuel is 8xdry mass
 
-for tank in range(1, 100, 1):
+for tank in range(1, 200, 1):
 	TANKS.append((4.*tank, tank/2.))
 
 for tank in (1, 2, 4):
@@ -62,8 +63,6 @@ for tank in (1, 2, 4):
 TANKS.append((.078675-.015, .015))
 TANKS.append((.136-.025, .025))
 TANKS.append((0, 0))
-TANKS_BY_MASS = [(sum(t), t) for t in TANKS]
-TANKS_BY_MASS.sort()
 TANKS.sort()
 
 # Table of engines
@@ -88,7 +87,7 @@ ENGINES = [
 	(280, 24., 10500 * .9, 'Septuple Mainsail'), # Run mainsails at 90% for heat
 	(330, 4., 650, 'Skipper'),
 	# (330, 8., 1300, 'Double Skipper'),
-	(800, 2.25, 60, 'LV-N'), # Skipped -- Too hard to land around
+	# (800, 2.25, 60, 'LV-N'), # Skipped -- Too hard to land around
 	(320, 1.8, 240, 'Radial pair'),
 	(320, 2.4, 260, 'Radial triplet'),
 	(290, .03, 1.5, 'LV-1'),
@@ -102,11 +101,6 @@ ENGINES_BY_MASS = [(e[1], e) for e in ENGINES]
 ENGINES.sort()
 ENGINES_BY_THRUST.sort()
 ENGINES_BY_MASS.sort()
-ENGINES_BY_IMPULSE = {}
-for isp in set([e[0] for e in ENGINES]):
-	ENGINES_BY_IMPULSE[isp] = []
-for e in ENGINES_BY_MASS:
-	ENGINES_BY_IMPULSE[e[1][0]].append(e[1])
 
 MIN_ISP = ENGINES[0][0]
 MAX_ISP = ENGINES[-1][0]
@@ -153,7 +147,7 @@ def stage_print(stage, delta_vs):
 		stage = stage[5]
 
 def stage_count(stage):
-	count = 1
+	count = 0
 	while stage is not None:
 		count += 1
 		stage = stage[5]
@@ -223,39 +217,26 @@ def find(payload_k, delta_vs, max_stages=10):
 				next_stage(stage, best, dv_goal, stages, delta_vs, next_stages, tank, engine)
 		return next_stages
 
-	def push_stage(heap, stages, stage, dv_goal):
+	def push_stage(heap, best_list, stage, dv_goal, best_by_stage):
 		''' 
 		Pushes the stage onto the heap iff the stage is higher than the bar. 
 		Stages must be lighter or have more dv than similar stages.
 		'''
-		if len(stages) == 0:
+		if len(best_list) == 0:
 			heapq.heappush(heap, (ideal(stage[0], dv_goal - stage[2]), stage))
-			stages.append(stage)
+			best_list.append(stage)
 			return
-		pos = bisect.bisect(stages, stage)
+		nstages = stage_count(stage[5])
+		if ((len(best_by_stage[nstages]) > 0) and 
+			(stage[5] not in best_by_stage[nstages-1])):
+			return
+		pos = bisect.bisect(best_list, stage)
 		# Ignore stage completely if the smaller item has a higher dv
-		# print stages, stage
-		# print stages[pos - 1][2], stage[2]
-		if pos > 1 and stages[pos - 1][2] > stage[2]:
+		if pos > 1 and best_list[pos - 1][2] >= stage[2]:
 			return
-	
-		# Remove items larger with a lower dv than our blessed stage
-		lbound = pos
-		ubound = len(stages) - 1
-		while lbound < ubound:
-			mid = (lbound + ubound) / 2
-			if stages[pos][2] > stages[mid][2]:
-				lbound = mid + 1
-			else:
-				ubound = mid - 1
-
-		# print pos, lbound, ubound, stages
-
-		# print pos, ubound
-		for i in xrange(ubound - pos):
-			# print i,
-			stages.pop(pos)
-		stages.insert(pos, stage)
+		while pos < len(best_list) and best_list[pos][2] <= stage[2]:
+			best_list.pop(pos)
+		best_list.insert(pos, stage)
 		heapq.heappush(heap, (ideal(stage[0], dv_goal - stage[2]), stage))
 		
 	dv_goal = sum((dv[0] for dv in delta_vs))
@@ -264,12 +245,13 @@ def find(payload_k, delta_vs, max_stages=10):
 	print start[0]
 	best = None # Best solution
 	heap = []
-	stages = []
+	stages = [[] for x in xrange(max_stages + 1)]
 	solved = False
-	push_stage(heap, stages, start, dv_goal)
+	push_stage(heap, stages[0], start, dv_goal, stages)
 	
 	while solved == False and len(heap) > 0:
 		head = heapq.heappop(heap)
+		nstages = stage_count(head[1])
 		# print head[1][0]
 		#dv_sum = head[1][2]
 		if head[1][2] > dv_goal:
@@ -279,24 +261,26 @@ def find(payload_k, delta_vs, max_stages=10):
 					# We have a better solution
 					print "best:", best[1][0], '->', head[1][0]
 					best = head
-					stage_print(best[1], delta_vs)
+					# stage_print(best[1], delta_vs)
 				elif best[0] > head[0]:
 					# best is THE solution
 					solved = True
 			else:
 				best = head
-				stage_print(best[1], delta_vs)
-		elif stage_count(head[1]) <= max_stages:
+				# stage_print(best[1], delta_vs)
+		elif nstages <= max_stages:
 			best_mass = float('inf')
 			if best is not None:
 				best_mass = best[0]
-			for item in next_states(head[1], best_mass, dv_goal, stages, delta_vs):
-				push_stage(heap, stages, item, dv_goal)
+			for item in next_states(head[1], best_mass, dv_goal, stages[nstages], delta_vs):
+				push_stage(heap, stages[nstages], item, dv_goal, stages)
 				
 	if solved or best is not None:
+		print stages
 		return best[1][0], best[1]
 	else:
 		print "Not solved!"
+		print stages
 		return None, None
 
 print PAYLOAD
@@ -309,22 +293,33 @@ MUN_PLAN = [(800., 0), (2200., MUN), (800., 0)]
 DUNA_PLAN = [(1673, 0), (1380*2,  DUNA), (915*2, IKE),  (1702, 0)]
 DUNAR_LANDER_PLAN = [(1380*2, DUNA), (915*2, IKE)]
 DUNA_AND_BACK = [(1673, 0), (1702, 0)]
-LKO = [(2000, 1.5), (2500, 1.5)]
+LKO = [(2000, 1.3), (2500, 1.5)]
 JETO = [(1000, 1.5), (3500, 1.5)]
 SSTO = [(4500, 1.5)]
 # PLAN = MUN_PLAN + LKO
-PLAN = MINMUS_PLAN + LKO
+# PLAN = MINMUS_PLAN + LKO
+# PLAN = DUNAR_LANDER_PLAN
+# PLAN = DUNAR_LANDER_PLAN
+PLAN = LKO
 #, (2000, 1.5), (2500, 1.5)]
 #DUNA_PLAN = desired_stages = [(1380*2 + 1673 + 915*2, DUNA), (1702, 0), (2000, 1.5), (2500, 1.5)]
-mass, stages = find(PAYLOAD, PLAN, 6)
+mass, stages = find(PAYLOAD, PLAN, 5)
 print "Lander:", mass
 stage_print(stages, PLAN)
-print PLAN
-#ENGINES.append( 
-	#(800, 2.25, 60, 'LV-N'), # Skipped -- Too hard to work around
-#)
-#mass, stages = find(mass, MUN_PLAN + LKO)
-#print "Lifter:"
-# mass, stages = find(6.76675, DUNA_AND_BACK + LKO)
-#print_stages(stages)
+# print PLAN
+sys.exit(0)
+bisect.insort(ENGINES, 
+	(800, 2.25, 60, 'LV-N'), # Skipped -- Too hard to work around
+)
+bisect.insort(ENGINES_BY_MASS,
+	(2.25, (800, 2.25, 60, 'LV-N')) # Skipped -- Too hard to work around
+)
+bisect.insort(ENGINES_BY_THRUST,
+	(60, (800, 2.25, 60, 'LV-N')) # Skipped -- Too hard to work around
+)
+MIN_ISP = ENGINES[0][0]
+MAX_ISP = ENGINES[-1][0]
+mass, stages = find(mass, DUNA_AND_BACK + LKO, 7)
+print "Lifter:"
+stage_print(stages, LKO)
 
