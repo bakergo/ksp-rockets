@@ -10,7 +10,7 @@ import functools
 G_m = 9.80665
 MUN = 1.624 / G_m * 1.5
 MINMUS = .491 / G_m * 1.5
-DUNA = 2.94 / G_m * 1.3
+DUNA = 2.94 / G_m * 1.5
 IKE = 1.10 / G_m * 1.3
 
 LARGE_POD = 4
@@ -29,7 +29,7 @@ CHUTE = .15
 CHUTES = .45
 TINY_STRUTS = .045
 SMALL_STRUTS = .15
-LARGE_STRUTS = .3
+LARGE_STRUTS = .4
 LADDER = .005
 LIGHTS = .03
 BATT = .005
@@ -40,12 +40,15 @@ SMALL_DOCKING_PORT = .05
 SEPARATOR = .05
 FUEL_LINE = .05
 STRUTS = .05
-STAGE_MASS = .025
-#MISC = .3
+DECOUPLER_MASS = [(0., .025 + FUEL_LINE), (9., .05 + FUEL_LINE + 2 * STRUTS)]
+SEPARATOR_MASS = [(0., .015), (2.00, .05), (9., .4)]
+
+MISC = .3
 # 
-# PAYLOAD = LARGE_CAN + CHUTES + SMALL_STRUTS + LADDER + LIGHTS + BATT + SMALL_DOCKING_PORT * 2 + SMALL_RCS
-PAYLOAD = 20.615
-# PAYLOAD = SMALL_CAN + CHUTE + LARGE_STRUTS + LADDER + LIGHTS + BATT + SMALL_DOCKING_PORT * 2 + SMALL_RCS
+# PAYLOAD = LARGE_CAN + CHUTES + LARGE_STRUTS + LADDER + LIGHTS + BATT + SMALL_DOCKING_PORT * 3 + SMALL_RCS + MISC + 4.
+# PAYLOAD = LARGE_POD + CHUTES + LARGE_STRUTS + LADDER + LIGHTS + BATT + SMALL_DOCKING_PORT * 3 + SMALL_RCS + MISC
+# PAYLOAD = SMALL_CAN + CHUTE * 4 + LARGE_STRUTS + LADDER + LIGHTS + BATT + SMALL_DOCKING_PORT * 2 + SMALL_RCS
+PAYLOAD = 16.87 + .075
 # PAYLOAD = 10.92205
 # PAYLOAD = 106.
 # PAYLOAD = 40. # Large fuel tank
@@ -68,15 +71,18 @@ class Tank(collections.namedtuple('Tank', 'fuel dry')):
 for tank in range(1, 10, 1):
 	TANKS.append(Tank(4.*tank, tank/2.))
 
-for tank in (1, 2, 3):
+# for tank in (1, 2, 3):
+for tank in (1, 2):
+#for tank in (1):
 	TANKS.append(Tank(tank, tank/8.))
-	TANKS.append(Tank(2*tank, tank/4.))
+	#TANKS.append(Tank(2*tank, tank/4.))
 
-TANKS.append(Tank(.078675-.015, .015))
-TANKS.append(Tank(.136-.025, .025))
+# TANKS.append(Tank(.078675-.015, .015))
+# TANKS.append(Tank(.136-.025, .025))
 TANKS.sort()
 
 SYMMETRIES = [1, 2, 3, 4, 6, 8]
+# SYMMETRIES = [1, 2, 4, 6, 8]
 SYMMETRIES.sort()
 
 class Engine(collections.namedtuple('Engine', 'isp_atm isp_vac mass thrust name min')):
@@ -278,9 +284,19 @@ class Stage():
 			self._dry_mass += self.tank.dry * self.nengines
 		if self.engine is not None:
 			self._dry_mass += self.engine.mass * self.nengines
-		if self.last is not None:
+		if self._dry_mass > 0. and self.nengines > 1:
+			# Decouple the tanks and/or engines only
 			self._dry_mass += self.last.mass
-		self._dry_mass += STAGE_MASS * self.nengines
+			decoupler_pos = bisect.bisect(DECOUPLER_MASS, (self._dry_mass, 0))
+			# Doing this blindly is not recommended.
+			# Oh well.
+			self._dry_mass += DECOUPLER_MASS[decoupler_pos - 1][1] * self.nengines
+		if self.last is not None and self.nengines <= 1:
+			self._dry_mass += self.last.mass
+			separator_pos = bisect.bisect(SEPARATOR_MASS, (self.last.mass, 0))
+			# Doing this blindly is not recommended.
+			# Oh well.
+			self._dry_mass += SEPARATOR_MASS[separator_pos - 1][1]
 		return self._dry_mass
 	
 	def isp(self, atm):
@@ -366,10 +382,6 @@ class BoosterStage(Stage):
 				self.last.thrust * self.last.isp(atm))/self.thrust
 		return isp
 
-	@property
-	def dry_mass(self):
-		return Stage.dry_mass.fget(self) + (FUEL_LINE + 2 * STRUTS) * self.nengines
-	
 	def isp(self, atm):
 		if self.engine is None:
 			return 0.
@@ -398,10 +410,6 @@ class BoosterStage(Stage):
 class FuelStage(Stage):
 	def __init__(self, tank, last, nengines, plan):
 		Stage.__init__(self, tank, None, last, nengines, plan)
-
-	@property
-	def dry_mass(self):
-		return Stage.dry_mass.fget(self) + (FUEL_LINE + 2 * STRUTS) * self.nengines
 
 	def isp(self, atm):
 		return 0. if self.last is None else self.last.isp(atm)
@@ -458,8 +466,8 @@ def ideal(payload_k, delta_v):
 	Includes the weight of the fuel, payload, "perfect" engine, and STAGE_MASS
 	'''
 	min_weight = ENGINES_BY_MASS[0].mass
-	adj_payload = payload_k + STAGE_MASS + min_weight;
-	ideal_mass = fuel_mass(delta_v, MAX_ISP, payload_k + STAGE_MASS + min_weight)
+	adj_payload = payload_k + DECOUPLER_MASS[0][1] + min_weight;
+	ideal_mass = fuel_mass(delta_v, MAX_ISP, payload_k + DECOUPLER_MASS[0][1] + min_weight)
 	return adj_payload + ideal_mass
 
 def stage_twr(plans, stage):
@@ -559,16 +567,17 @@ DUNAR_LANDER_PLAN = [
 	Plan(915*2, IKE, 0.),
 ]
 DUNA_AND_BACK = [
-	Plan(950*2 + 110*2 + 270 * 2, 0., 0.),
+	Plan(950*2 + 110*2 + 270 * 2, 0.1, 0.),
 ]
 #LKO = [(2000, 1.3), (2500, 1.5)]
 LKO = [
 	Plan(1000., 1.0, .1),
-	Plan(1000., 1.1, .3),
+	Plan(1000., 1.3, .3),
 	Plan(1500., 1.4, .7),
 	Plan(1000., 1.5, .9),
 ]
 	
+# PLAN = LKO
 # PLAN = MUN_PLAN + LKO
 # PLAN = MINMUS_PLAN + LKO
 PLAN = DUNA_AND_BACK + LKO
@@ -576,6 +585,6 @@ PLAN = DUNA_AND_BACK + LKO
 # PLAN = DUNAR_LANDER_PLAN
 #, (2000, 1.5), (2500, 1.5)]
 #DUNA_PLAN = desired_stages = [(1380*2 + 1673 + 915*2, DUNA), (1702, 0), (2000, 1.5), (2500, 1.5)]
-mass, stages = find(PAYLOAD, PLAN, 6)
+mass, stages = find(PAYLOAD, PLAN, 8)
 print "Lander:", mass
 stages.pretty_print()
